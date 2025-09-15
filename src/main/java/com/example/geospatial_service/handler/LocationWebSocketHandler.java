@@ -35,7 +35,11 @@ public class LocationWebSocketHandler extends TextWebSocketHandler {
         try {
             UpdateLocationRequest request = objectMapper.readValue(message.getPayload(), UpdateLocationRequest.class);
             locationService.updateDriverLocation(driverId, request.longitude(), request.latitude())
-                           .subscribe();
+                           .subscribe(
+                                   null,
+                                   error -> log.error("위치 업데이트 중 Redis 오류 발생. Driver ID: {}", driverId,
+                                           error)
+                           );
 
         } catch (IOException e) {
             log.error("위치 정보 메시지 처리 실패. Driver ID: {}, Payload: {}", driverId, message.getPayload(), e);
