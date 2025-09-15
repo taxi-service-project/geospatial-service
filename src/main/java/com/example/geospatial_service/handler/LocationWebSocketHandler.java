@@ -53,11 +53,14 @@ public class LocationWebSocketHandler extends TextWebSocketHandler {
     }
 
     private String extractDriverId(WebSocketSession session) {
-        URI uri = Objects.requireNonNull(session.getUri());
-        String[] pathSegments = uri.getPath().split("/");
-        if (pathSegments.length > 0) {
-            return pathSegments[pathSegments.length - 1];
+        String path = Objects.requireNonNull(session.getUri()).getPath();
+        String prefix = "/ws/location/";
+        if (path.startsWith(prefix)) {
+            String driverId = path.substring(prefix.length());
+            if (!driverId.isBlank()) {
+                return driverId;
+            }
         }
-        throw new IllegalArgumentException("URL에서 Driver ID를 추출할 수 없습니다.");
+        throw new IllegalArgumentException("URL에서 유효한 Driver ID를 추출할 수 없습니다: " + path);
     }
 }
