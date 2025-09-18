@@ -1,6 +1,7 @@
 package com.example.geospatial_service.service;
 
 import com.example.geospatial_service.dto.NearbyDriverResponse;
+import com.example.geospatial_service.kafka.dto.DriverLocationUpdatedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.geo.Distance;
@@ -9,6 +10,7 @@ import org.springframework.data.geo.Point;
 import org.springframework.data.redis.connection.RedisGeoCommands;
 import org.springframework.data.geo.Circle;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -19,10 +21,15 @@ import reactor.core.publisher.Mono;
 public class LocationService {
 
     private final ReactiveRedisTemplate<String, String> reactiveRedisTemplate;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
     private static final String DRIVER_LOCATIONS_KEY = "driver_locations";
+    private static final String LOCATION_EVENTS_TOPIC = "location_events";
 
     public Mono<Void> updateDriverLocation(String driverId, double longitude, double latitude) {
         Point point = new Point(longitude, latitude);
+
+        DriverLocationUpdatedEvent event = new DriverLocationUpdatedEvent(driverId, latitude, longitude);
+        kafkaTemplate.send(LOCATION_EVENTS_TOPIC, event);
 
         return reactiveRedisTemplate.opsForGeo()
                                     .add(DRIVER_LOCATIONS_KEY, point, "driver:" + driverId)
