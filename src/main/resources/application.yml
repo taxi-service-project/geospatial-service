@@ -18,16 +18,18 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       properties:
         spring.json.add.type.headers: true
-        linger.ms: 50 # 메시지를 모아서 보내는 시간
-        batch.size: 131072 # 128KB
-        buffer.memory: 33554432 # 32MB
+        linger.ms: 50
+        batch.size: 131072
+        buffer.memory: 33554432
         request.timeout.ms: 30000
     consumer:
       group-id: geospatial-service-group
       auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.use.type.headers: true
         spring.json.trusted.packages: "*"
         max.poll.records: 500
@@ -36,7 +38,7 @@ spring:
           com.example.trip_service.kafka.dto.TripCompletedEvent:com.example.geospatial_service.kafka.dto.TripCompletedEvent,
           com.example.trip_service.kafka.dto.TripCanceledEvent:com.example.geospatial_service.kafka.dto.TripCanceledEvent
     listener:
-      ack-mode: RECORD
+      ack-mode: BATCH
 
 eureka:
   client:
