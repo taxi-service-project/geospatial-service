@@ -5,10 +5,14 @@ spring:
   application:
     name: geospatial-service
 
-  data:
-    redis:
-      host:
-      port:
+  redis:
+    cache:
+      host: localhost
+      port: 6379
+    storage:
+      host: localhost
+      port: 6380
+
   kafka:
     bootstrap-servers: 192.168.1.100:9092
     producer:
