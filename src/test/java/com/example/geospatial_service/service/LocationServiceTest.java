@@ -1,10 +1,10 @@
 package com.example.geospatial_service.service;
 
 import com.example.geospatial_service.dto.NearbyDriverResponse;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.geo.*;
@@ -18,12 +18,14 @@ import reactor.test.StepVerifier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class LocationServiceTest {
 
-    @InjectMocks
+    // @InjectMocks 대신 직접 생성할 것이므로 선언만 합니다.
     private LocationService locationService;
 
     @Mock
@@ -38,6 +40,12 @@ class LocationServiceTest {
     @Mock
     private ReactiveGeoOperations<String, String> reactiveGeoOperations;
 
+    @BeforeEach
+    void setUp() {
+        // 같은 타입의 Mock이 2개일 때는 직접 생성자로 주입하는 것이 가장 안전
+        locationService = new LocationService(cacheRedisTemplate, storageRedisTemplate, kafkaTemplate);
+    }
+
     @Test
     @DisplayName("주변 기사 검색 시, '생존 신고(Active Key)'가 있는 기사만 반환해야 한다")
     void findNearbyDrivers_Success_OnlyActiveDrivers() {
@@ -45,6 +53,7 @@ class LocationServiceTest {
         double lon = 127.0, lat = 37.5;
         int radius = 5;
 
+        // Redis GeoResult Mock 데이터
         var result1 = new GeoResult<>(
                 new RedisGeoCommands.GeoLocation<>("driver:101", new Point(127.01, 37.51)),
                 new Distance(1.5, Metrics.KILOMETERS)
@@ -54,24 +63,20 @@ class LocationServiceTest {
                 new Distance(2.5, Metrics.KILOMETERS)
         );
 
-        when(cacheRedisTemplate.opsForGeo()).thenReturn(reactiveGeoOperations);
-        when(reactiveGeoOperations.radius(anyString(), any(Circle.class), any(RedisGeoCommands.GeoRadiusCommandArgs.class)))
-                .thenReturn(Flux.just(result1, result2));
+        given(cacheRedisTemplate.opsForGeo()).willReturn(reactiveGeoOperations);
+        given(reactiveGeoOperations.radius(anyString(), any(Circle.class), any(RedisGeoCommands.GeoRadiusCommandArgs.class)))
+                .willReturn(Flux.just(result1, result2));
 
-        when(storageRedisTemplate.hasKey("driver_active:101")).thenReturn(Mono.just(true));
-        when(storageRedisTemplate.hasKey("driver_active:102")).thenReturn(Mono.just(true));
+        given(storageRedisTemplate.hasKey("driver_active:101")).willReturn(Mono.just(true));
+        given(storageRedisTemplate.hasKey("driver_active:102")).willReturn(Mono.just(true));
 
         // when
         Flux<NearbyDriverResponse> resultFlux = locationService.findNearbyDrivers(lon, lat, radius);
 
         // then
         StepVerifier.create(resultFlux)
-                    .assertNext(driver -> {
-                        assertThat(driver.driverId()).isEqualTo("101");
-                    })
-                    .assertNext(driver -> {
-                        assertThat(driver.driverId()).isEqualTo("102");
-                    })
+                    .assertNext(driver -> assertThat(driver.driverId()).isEqualTo("101"))
+                    .assertNext(driver -> assertThat(driver.driverId()).isEqualTo("102"))
                     .verifyComplete();
     }
 
@@ -91,25 +96,26 @@ class LocationServiceTest {
                 new Distance(2.0, Metrics.KILOMETERS)
         );
 
-        when(cacheRedisTemplate.opsForGeo()).thenReturn(reactiveGeoOperations);
-        when(reactiveGeoOperations.radius(anyString(), any(Circle.class), any(RedisGeoCommands.GeoRadiusCommandArgs.class)))
-                .thenReturn(Flux.just(activeDriver, zombieDriver));
+        given(cacheRedisTemplate.opsForGeo()).willReturn(reactiveGeoOperations);
+        given(reactiveGeoOperations.radius(anyString(), any(Circle.class), any(RedisGeoCommands.GeoRadiusCommandArgs.class)))
+                .willReturn(Flux.just(activeDriver, zombieDriver));
 
-        when(storageRedisTemplate.hasKey("driver_active:101")).thenReturn(Mono.just(true));
-        when(storageRedisTemplate.hasKey("driver_active:999")).thenReturn(Mono.just(false));
+        given(storageRedisTemplate.hasKey("driver_active:101")).willReturn(Mono.just(true));
+        given(storageRedisTemplate.hasKey("driver_active:999")).willReturn(Mono.just(false));
 
-        when(reactiveGeoOperations.remove(anyString(), eq("driver:999"))).thenReturn(Mono.just(1L));
+        given(cacheRedisTemplate.opsForGeo().remove(anyString(), eq("driver:999")))
+                .willReturn(Mono.just(1L));
 
         // when
         Flux<NearbyDriverResponse> resultFlux = locationService.findNearbyDrivers(lon, lat, radius);
 
         // then
         StepVerifier.create(resultFlux)
-                    .assertNext(driver -> {
-                        assertThat(driver.driverId()).isEqualTo("101");
-                    })
+                    .assertNext(driver -> assertThat(driver.driverId()).isEqualTo("101"))
                     .verifyComplete();
 
-        verify(reactiveGeoOperations, times(1)).remove(anyString(), eq("driver:999"));
+        // Verify: 실제로 삭제 메서드가 호출되었는지 검증
+        verify(reactiveGeoOperations).remove(anyString(), eq("driver:999"));
+        verify(reactiveGeoOperations, never()).remove(anyString(), eq("driver:101"));
     }
 }
