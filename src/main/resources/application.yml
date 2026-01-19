@@ -41,9 +41,7 @@ spring:
           com.example.trip_service.kafka.dto.TripMatchedEvent:com.example.geospatial_service.kafka.dto.TripMatchedEvent,
           com.example.trip_service.kafka.dto.TripCompletedEvent:com.example.geospatial_service.kafka.dto.TripCompletedEvent,
           com.example.trip_service.kafka.dto.TripCanceledEvent:com.example.geospatial_service.kafka.dto.TripCanceledEvent
-    listener:
-      ack-mode: BATCH
-      observation-enabled: true
+
     template:
       observation-enabled: true
 
