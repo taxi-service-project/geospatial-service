@@ -1,15 +1,17 @@
 package com.example.geospatial_service.kafka;
 
-import com.example.geospatial_service.handler.LocationWebSocketHandler;
 import com.example.geospatial_service.kafka.dto.TripCanceledEvent;
 import com.example.geospatial_service.kafka.dto.TripCompletedEvent;
 import com.example.geospatial_service.kafka.dto.TripMatchedEvent;
 import com.example.geospatial_service.kafka.dto.socket.DriverConfigMessage;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.kafka.annotation.KafkaHandler;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.Mono;
 
 @Component
 @Slf4j
@@ -17,28 +19,34 @@ import org.springframework.stereotype.Component;
 @KafkaListener(topics = "trip_events", groupId = "geospatial-service-group")
 public class DriverConfigConsumer {
 
-    private final LocationWebSocketHandler locationWebSocketHandler;
+    private final ReactiveRedisTemplate<String, String> reactiveRedisTemplate;
+    private final ObjectMapper objectMapper;
 
-    // 배차 완료 -> 바빠짐 -> 1초 주기
     @KafkaHandler
     public void handleTripMatched(TripMatchedEvent event) {
-        locationWebSocketHandler.sendConfigToDriver(event.driverId(), DriverConfigMessage.highFrequency());
+        publishConfig(event.driverId(), DriverConfigMessage.highFrequency());
     }
 
-    // 운행 종료 -> 한가해짐 -> 10초 주기
     @KafkaHandler
     public void handleTripCompleted(TripCompletedEvent event) {
-        locationWebSocketHandler.sendConfigToDriver(event.driverId(), DriverConfigMessage.lowFrequency());
+        publishConfig(event.driverId(), DriverConfigMessage.lowFrequency());
     }
 
     @KafkaHandler
     public void handleTripCanceled(TripCanceledEvent event) {
-        log.info("여정 취소 수신 -> 기사({}) 10초 주기로 변경", event.driverId());
-        locationWebSocketHandler.sendConfigToDriver(event.driverId(), DriverConfigMessage.lowFrequency());
+        publishConfig(event.driverId(), DriverConfigMessage.lowFrequency());
     }
 
-    @KafkaHandler(isDefault = true)
-    public void handleUnknown(Object event) {
-        log.warn("알 수 없는 이벤트 수신: {}", event);
+    private void publishConfig(String driverId, DriverConfigMessage message) {
+        String topic = "driver:config:" + driverId;
+
+        Mono.fromCallable(() -> objectMapper.writeValueAsString(message))
+            .flatMap(json -> reactiveRedisTemplate.convertAndSend(topic, json))
+            .doOnSuccess(count -> {
+                if (count == 0) log.warn("설정 메시지를 받은 서버가 없습니다 (기사 오프라인 가능성): {}", driverId);
+                else log.info("기사({}) 설정 방송 완료", driverId);
+            })
+            .doOnError(e -> log.error("Redis 방송 실패: {}", driverId, e))
+            .subscribe();
     }
 }
