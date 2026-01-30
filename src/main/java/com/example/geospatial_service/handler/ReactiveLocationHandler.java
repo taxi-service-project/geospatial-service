@@ -10,10 +10,13 @@ import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketHandler;
+import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.net.URI;
+import java.time.Duration;
 
 @Component
 @Slf4j
@@ -31,19 +34,44 @@ public class ReactiveLocationHandler implements WebSocketHandler {
         String driverId = extractDriverId(session);
         String configTopic = "driver:config:" + driverId;
 
+        // Input: 기사가 보내는 위치 정보 처리
         Mono<Void> input = session.receive()
-                                  .flatMap(msg ->
-                                          Mono.fromCallable(() -> objectMapper.readValue(msg.getPayloadAsText(), UpdateLocationRequest.class))
-                                              .flatMap(req -> locationService.updateDriverLocation(driverId, req.longitude(), req.latitude()))
-                                              .doOnError(e -> log.error("위치 업데이트 실패 (세션 유지): {}", driverId, e))
-                                              .onErrorResume(e -> Mono.empty())
-                                  )
+                                  // 타임아웃을 맨 위로 (메시지가 들어오면 무조건 타이머 리셋)
+                                  .timeout(Duration.ofSeconds(30))
+                                  .flatMap(msg -> {
+                                      String payload = msg.getPayloadAsText();
+
+                                      // PONG 필터링
+                                      if ("PONG".equalsIgnoreCase(payload)) {
+                                          log.trace("기사({}) 생존 확인 (PONG)", driverId);
+                                          return Mono.empty();
+                                      }
+
+                                      // 실제 위치 정보 처리
+                                      return Mono.fromCallable(() -> objectMapper.readValue(payload, UpdateLocationRequest.class))
+                                                 .flatMap(req -> locationService.updateDriverLocation(driverId, req.longitude(), req.latitude()))
+                                                 .doOnError(e -> log.error("위치 업데이트 실패: {}", driverId, e))
+                                                 .onErrorResume(e -> Mono.empty());
+                                  })
+                                  .onErrorResume(e -> {
+                                      // Timeout 발생 시 로그 찍고 종료
+                                      if (e instanceof java.util.concurrent.TimeoutException) {
+                                          log.warn("기사 연결 타임아웃 종료: {}", driverId);
+                                      }
+                                      return Mono.empty();
+                                  })
                                   .then();
 
-        Mono<Void> output = session.send(
-                reactiveRedisTemplate.listenTo(ChannelTopic.of(configTopic))
-                                     .map(message -> session.textMessage(message.getMessage()))
-        );
+        Flux<WebSocketMessage> configFlux = reactiveRedisTemplate.listenTo(ChannelTopic.of(configTopic))
+                                                                 .map(message -> session.textMessage(message.getMessage()))
+                                                                 .doOnError(e -> log.error("Redis 구독 에러", e));
+
+        // 10초마다 PING 전송
+        Flux<WebSocketMessage> pingFlux = Flux.interval(Duration.ofSeconds(10))
+                                              .map(i -> session.textMessage("PING"));
+
+        // Output: Config + Ping 병합 전송
+        Mono<Void> output = session.send(Flux.merge(configFlux, pingFlux));
 
         return Mono.zip(input, output).then()
                    .doFinally(signal -> log.info("기사 연결 종료: {}", driverId));
