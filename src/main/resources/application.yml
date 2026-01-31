@@ -1,9 +1,12 @@
 server:
   port: 8085
+  shutdown: graceful
 
 spring:
   application:
     name: geospatial-service
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
 
   redis:
     cache:
