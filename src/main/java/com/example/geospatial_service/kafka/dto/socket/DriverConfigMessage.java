@@ -10,6 +10,6 @@ public record DriverConfigMessage(String type, Payload payload) {
 
     // [대기 모드] 운행 종료/대기: 10초마다 전송
     public static DriverConfigMessage lowFrequency() {
-        return new DriverConfigMessage("CONFIG_UPDATE", new Payload(10000));
+        return new DriverConfigMessage("CONFIG_UPDATE", new Payload(5000));
     }
 }
