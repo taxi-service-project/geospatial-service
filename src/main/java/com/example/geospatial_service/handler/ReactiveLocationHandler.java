@@ -39,6 +39,7 @@ public class ReactiveLocationHandler implements WebSocketHandler {
         Mono<Void> input = session.receive()
                                   // 타임아웃을 맨 위로 (메시지가 들어오면 무조건 타이머 리셋)
                                   .timeout(Duration.ofSeconds(30))
+                                  .sample(Duration.ofMillis(1000))
                                   .flatMap(msg -> {
                                       String payload = msg.getPayloadAsText();
 
