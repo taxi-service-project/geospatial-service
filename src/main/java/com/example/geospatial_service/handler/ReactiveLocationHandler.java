@@ -39,15 +39,19 @@ public class ReactiveLocationHandler implements WebSocketHandler {
         Mono<Void> input = session.receive()
                                   // 타임아웃을 맨 위로 (메시지가 들어오면 무조건 타이머 리셋)
                                   .timeout(Duration.ofSeconds(30))
+                                  // [Filter] PONG은 타임아웃 리셋용이므로, 비즈니스 로직으로 넘기지 않고 여기서 소멸시킴
+                                  .filter(msg -> {
+                                      String payload = msg.getPayloadAsText();
+                                      // PONG이면 로그만 찍고 버림 (false 반환)
+                                      if ("PONG".equalsIgnoreCase(payload)) {
+                                          log.trace("기사({}) 생존 확인 (PONG)", driverId);
+                                          return false;
+                                      }
+                                      return true; // 위치 정보면 통과
+                                  })
                                   .sample(Duration.ofMillis(1000))
                                   .flatMap(msg -> {
                                       String payload = msg.getPayloadAsText();
-
-                                      // PONG 필터링
-                                      if ("PONG".equalsIgnoreCase(payload)) {
-                                          log.trace("기사({}) 생존 확인 (PONG)", driverId);
-                                          return Mono.empty();
-                                      }
 
                                       // 실제 위치 정보 처리
                                       return Mono.fromCallable(() -> objectMapper.readValue(payload, UpdateLocationRequest.class))
