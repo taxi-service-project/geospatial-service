@@ -14,6 +14,7 @@ import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.util.retry.Retry;
 
 import java.net.URI;
 import java.time.Duration;
@@ -63,8 +64,17 @@ public class ReactiveLocationHandler implements WebSocketHandler {
                                   .then();
 
         Flux<WebSocketMessage> configFlux = reactiveRedisTemplate.listenTo(ChannelTopic.of(configTopic))
-                                                                 .map(message -> session.textMessage(message.getMessage()))
-                                                                 .doOnError(e -> log.error("Redis 구독 에러", e));
+                                                                .map(message -> session.textMessage(message.getMessage()))
+                                                                .retryWhen(Retry.backoff(3, Duration.ofSeconds(2)) // 최대 3번 재시도, 시작은 2초부터 지수적으로 증가
+                                                                                .doBeforeRetry(retrySignal ->
+                                                                                        log.warn("Redis 구독 재시도 중... (시도 횟수: {})", retrySignal.totalRetries() + 1)
+                                                                                )
+                                                                                .onRetryExhaustedThrow((retryBackoffSpec, retrySignal) -> {
+                                                                                    log.error("Redis 구독 최종 실패: 재시도 횟수 초과");
+                                                                                    return retrySignal.failure();
+                                                                                })
+                                                                )
+                                                                .doOnError(e -> log.error("Redis Pub/Sub Fatal Error: {}", e.getMessage()));
 
         // 10초마다 PING 전송
         Flux<WebSocketMessage> pingFlux = Flux.interval(Duration.ofSeconds(10))
