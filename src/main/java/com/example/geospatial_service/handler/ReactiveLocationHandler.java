@@ -30,10 +30,20 @@ public class ReactiveLocationHandler implements WebSocketHandler {
     @Qualifier("cacheRedisTemplate")
     private final ReactiveRedisTemplate<String, String> reactiveRedisTemplate;
 
+    @Qualifier("storageRedisTemplate")
+    private final ReactiveRedisTemplate<String, String> storageRedisTemplate;
+
     @Override
     public Mono<Void> handle(WebSocketSession session) {
         String driverId = extractDriverId(session);
         String configTopic = "driver:config:" + driverId;
+        String statusKey = "driver_status:" + driverId;
+
+        // 연결 시작 시: Storage Redis에 'isAvailable = 1' 설정
+        Mono<Void> setOnline = storageRedisTemplate.opsForHash()
+                                                   .put(statusKey, "isAvailable", "1")
+                                                   .doOnSuccess(v -> log.info("기사({}) 상태 변경: ONLINE (1)", driverId))
+                                                   .then();
 
         // Input: 기사가 보내는 위치 정보 처리
         Mono<Void> input = session.receive()
@@ -88,8 +98,20 @@ public class ReactiveLocationHandler implements WebSocketHandler {
         // Output: Config + Ping 병합 전송
         Mono<Void> output = session.send(Flux.merge(configFlux, pingFlux));
 
-        return Mono.zip(input, output).then()
-                   .doFinally(signal -> log.info("기사 연결 종료: {}", driverId));
+        // setOnline 실행 후 -> 입출력 스트림 실행 -> 종료 시 setOffline
+        return setOnline
+                .then(Mono.zip(input, output))
+                .then()
+                .doFinally(signal -> {
+                    log.info("기사 연결 종료 (Signal: {}): {}", signal, driverId);
+
+                    // 연결 종료 시: 키 삭제 (메모리 확보 및 배차 대상 제외)
+                    storageRedisTemplate.delete(statusKey)
+                                        .subscribe(
+                                                null,
+                                                e -> log.error("상태 키 삭제 실패: {}", driverId, e)
+                                        );
+                });
     }
 
     private String extractDriverId(WebSocketSession session) {
