@@ -13,6 +13,8 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
+
 @Component
 @Slf4j
 @RequiredArgsConstructor
@@ -40,13 +42,21 @@ public class DriverConfigConsumer {
     private void publishConfig(String driverId, DriverConfigMessage message) {
         String topic = "driver:config:" + driverId;
 
-        Mono.fromCallable(() -> objectMapper.writeValueAsString(message))
-            .flatMap(json -> reactiveRedisTemplate.convertAndSend(topic, json))
-            .doOnSuccess(count -> {
-                if (count == 0) log.warn("설정 메시지를 받은 서버가 없습니다 (기사 오프라인 가능성): {}", driverId);
-                else log.info("기사({}) 설정 방송 완료", driverId);
-            })
-            .doOnError(e -> log.error("Redis 방송 실패: {}", driverId, e))
-            .subscribe();
+        try {
+            Boolean success = Mono.fromCallable(() -> objectMapper.writeValueAsString(message))
+                                  .flatMap(json -> reactiveRedisTemplate.convertAndSend(topic, json))
+                                  .map(count -> count > 0)
+                                  .block(Duration.ofSeconds(2));
+
+            if (Boolean.TRUE.equals(success)) {
+                log.info("기사({}) 설정 방송 성공", driverId);
+            } else {
+                log.warn("기사 오프라인 (수신 서버 없음): {}", driverId);
+            }
+
+        } catch (Exception e) {
+            log.error("Redis 방송 실패 (재시도 대상): {}", driverId);
+            throw new RuntimeException("Redis 전송 장애로 인한 재시도 유도", e);
+        }
     }
 }
