@@ -1,4 +1,4 @@
-# 📍 Geospatial Service (LBS)
+# 📍 Geospatial Service
 
 > **기사 위치 데이터를 실시간으로 수집·가공하고, 반경 검색 및 실시간 전송 제어를 담당합니다.**
 
